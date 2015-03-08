@@ -1,0 +1,12 @@
+Error Codes:
+1: 10 = "OK"
+2: 11 = "PinCode was invalid!"
+3: 12 = "Pin Code was not complete before a function key was pressed!"
+4: 13 = "Expected a function key but a number was entered instead!"
+5: 14 = "Master Pin Code is NOT Valid!"
+6: 21 = "The number of existing Pin codes are at the maximum of 10"
+7: 22 = "New Pin Code matches existing Master Code!"
+8: 23 = "New Master Code matches an existing User Pin Code!"
+9: 24 = "Unknown Error"
+
+

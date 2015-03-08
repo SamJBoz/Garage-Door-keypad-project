@@ -1,0 +1,359 @@
+/*
+Rules:
+ - Pin code must be exactly 4 digits.
+ - Garage Keypad only holds 10 seperate Pin codes.
+ */
+
+#include <EEPROM.h>
+//add in support for keypad
+#include <Keypad.h>
+const byte rows = 4;
+const byte cols = 4;
+
+
+char keys[rows][cols] = {
+  {
+    '1','2','3','U'        }
+  , //U used to toggle door
+  {
+    '4','5','6','D'        }
+  , //D used to toggle door
+  {
+    '7','8','9','*'        }
+  , // * -used to delete all Pin codes.
+  {
+    'C','0','?','E'        } // C = clear, E -indicates a new Pin code to add, ? -used to enter a NEW Master code (4 digits)
+};
+
+byte rowPins[rows] = {
+  4, 5, 6, 7}; //connect to the row pinouts of the keypad
+byte colPins[cols] = {
+  8, 9, 10, 11}; //connect to the column pinouts of the keypad
+Keypad garageKeypad = Keypad( makeKeymap(keys), rowPins, colPins, rows, cols );
+
+//********** User variables *********************************************
+int pinPointer = 0; //initialize pinPointer variable
+const int pinPointerSave = 250; //Save the pin pointer at EEProm address 250
+String pinCode =  ""; //variable to hold Pin Codes (4) digits)
+String temp = ""; //temporary variable used to compare strings
+char pinChar; //Used to read individual characters from EEPROM
+char mf = 'X'; //Used to hold Master Function code ('E' or '?')
+char key; //Used to read in keypad key
+boolean result; //Used to indicate true or false
+
+void setup(){ //*******************************************************************
+
+  Serial.begin(9600);
+  pinCode = ""; //initialize pinCode String
+  garageKeypad.setDebounceTime(50);           // Default is 50mS
+  initializeMaster(); //set Master pinCode to '1234' if it does not exist 
+}
+
+void loop()//***********************************************************************
+{
+  key = garageKeypad.getKey();
+
+  if (key)  //if a key was pressed then...*****************************************
+  { 
+    result = pinCode.length()<4;  //check to see if pinCode has less than 4 characters
+    switch (result) {
+    case true:  //pinCode length < 4
+      if (key >= 0x30 && key <= 0x39) addDigit();
+      else if (key == 'C'){ 
+        pinCode = "";
+        mf = 'X';
+        message("pinCode input cleared: Try again");
+      } // add a Beep
+
+      else { //case !true
+        message("Not a number: Try again!");
+        mf = 'X';
+        pinCode="";
+      }
+      break; //case true
+
+    case false: //pinCode length !< 4
+      if (key >= 0x30 && key <= 0x39){
+        message("Extra digit: Try again!");
+        mf = 'X'; 
+        pinCode="";
+      }
+
+      else{ //key is not numeric
+        switch (key) {
+        case 'E': //Enter new pin code**********************************************************
+          pinPointer = EEPROM.read(pinPointerSave);
+          if (pinPointer < 10){
+            switch(mf){
+            case 'X': //new pincode needed
+              result = checkMaster(pinCode);
+              if (result == true){                                            
+                mf = 'a';
+                pinCode = "";
+                message("Ready to get new pin code");
+                break;
+              }
+
+              else{ //result == false
+                pinCode = "";
+                message("Master Code NOT Valid: pinCode cleared");
+                break;
+              }
+
+              break; //Case 'X'
+
+
+            case 'a': // Pincode ready to be written
+
+              result = addPinCode(pinCode);
+              pinCode="";
+              mf = 'X';
+              break; // case 'a'
+
+            }//end switch(mf)
+
+          }  //END (pinPointer < 10)
+
+          else{//pinPointer is NOT < 10
+            message("Pin codes at maximum of 10");
+            //TODO.. add error beeps and such
+            mf = 'X';
+            pinCode ="";
+          }//end of else
+
+          break;//case 'E'
+
+        case '*': //Erase all pin codes *******************************************************
+
+          result = checkMaster(pinCode);
+          if (result == true){
+            earasePinCodes();
+            message("Pin Codes Erased!");
+            pinCode="";
+          }
+
+          else{
+            message("Master NOT valid!");
+            pinCode="";
+          }
+
+          break;//break case '*'
+
+
+        case '?': //Enter new Master code ******************************************************* 
+          pinPointer = EEPROM.read(pinPointerSave);                               
+          switch(mf){
+          case 'X': //new Master code needed
+            result = checkMaster(pinCode);
+            if (result == true){                                            
+              mf = 'A';
+              pinCode = "";
+              message("Ready to get new Master code");
+              break;
+            }
+
+            else{ //result == false
+              pinCode = "";
+              message("Master Code NOT Valid: pinCode cleared");
+              break;
+            }
+
+            break; //Case 'X'
+
+
+          case 'A': // Master code ready to be written
+
+            addNewMaster(pinCode);
+            pinCode="";
+            mf = 'X';
+            break; // case 'A'
+
+          }//end switch(mf)
+
+          break;//End Case '?'
+
+        case 'C': //Clear input pinCode ************************************************************
+          pinCode="";
+          mf = 'X';
+          message("Clear pinCode input");
+          break;
+
+        case 'D': //Toggle Door *************************************************************    
+          result = checkPinCode(pinCode);
+          if (result == true) message("Pin Code was OK!: Toggle Door");
+          if (result == false) message("Pin Code was NOT VALID!");
+          pinCode="";
+          break;
+
+        case 'U': //Toggle Door **************************************************************
+          result = checkPinCode(pinCode);
+          if (result == true) message("Pin Code was OK!: Toggle Door");
+          if (result == false) message("Pin Code was NOT VALID!");
+          pinCode="";
+          break;
+
+        default:
+          message("Number entered: Try again");
+          break;      
+        } //end switch (key)
+      }//key is not numeric       
+      break;//break case false
+
+    default: 
+      message("Unknown Error");
+      break;
+    }
+
+  }//End of if(key) 
+}//End of loop 
+
+// Add new Master code *************************************************************
+void addNewMaster(String pinCode)
+{
+  for (int i = 0; i < 4; i++){   
+    EEPROM.write(i+4,pinCode.charAt(i));
+  }  
+  message("New Master code was added");
+}//End addNewMaster(pinCode)
+
+
+// Check user pinCode and return 'true' if it is valid
+boolean checkPinCode(String pinCode){ //*********************************************
+  temp = ""; //initialize compare variable
+  pinPointer = EEPROM.read(pinPointerSave); //Get the pinPointer (0-9);
+  for(int i = 0; i < pinPointer +1; i++ ){ // cycle through saved pin code addresses
+    for (int j = 0 ; j < 4; j++){  //cycle through each digit of  current pin code
+      pinChar = EEPROM.read((i+2)*4+j); //read in 4 digits into temp variable
+      temp += pinChar;
+    }//End for int j   
+    if (temp == pinCode) {
+      temp = "";
+      return true;
+    }
+    else{
+      temp="";
+    }
+
+  } //End for int i
+  return false; // Pin code not found
+} //end function checkPinCode
+
+
+// Add a new pinCode and return True or False (Success or Failure)
+boolean addPinCode(String pinCode)//*****************************************************
+{ 
+  pinPointer = EEPROM.read(pinPointerSave); //Read the pinPointer (Max 10)
+
+  //Write pinCode to next memory spot
+  for (int i = 0; i < 4; i++) {  
+    EEPROM.write(((pinPointer+2)*4+i),pinCode.charAt(i));
+  }
+  //Now read it back and check that it is correct
+  for (int i = 0; i < 4; i++){   
+    if((EEPROM.read((pinPointer+2)*4+i))!= pinCode.charAt(i)){
+      message("Pin code did not write into memory properly!");
+      return false;
+    }
+  } // If any digit was incorrect then exit with 'false'
+
+  pinPointer++; //Add 1 to pinPointer
+  EEPROM.write(pinPointerSave,pinPointer); //Write new pinPonter value back to pinPointerSave address
+  message("Pin code was added successfully!");
+  Serial.println(pinPointer);
+  return true;//All digits were correct so return 'true'
+}//End addPinCode(String pinCode)
+
+
+// Message function //**************************************************************
+void message(String Message)
+{
+  Serial.println(Message);
+}
+
+
+// Append digit to pinCode**********************************************************
+void addDigit()
+{
+  if(pinCode.length() < 4)
+  {
+    pinCode += key;
+    Serial.println("Adding digit to pinCode");
+    Serial.println("Pin Code = " + pinCode);
+  }  
+
+  else 
+  {
+    Serial.println("Extra digit: Try again: pinCode cleared");
+    pinCode = "";
+  }
+}
+
+
+
+// Creates a 'Default' master PinCode (1234) if none exists.
+void initializeMaster(){ //**********************************************************************
+  // initialize string variable
+  pinCode = "";
+  //Get first 4 char of EEProm memory
+  for (int i = 0; i < 4; i++) {
+    pinChar = (EEPROM.read(i));
+    pinCode += pinChar;
+  }
+  // If masterCode does not equal 'MAST' then
+  // write 'MAST1234' into first 8 bytes of EEProm memory
+  if (pinCode != "MAST") 
+  {
+    Serial.println("Master code does NOT exist");
+    pinCode = "MAST";
+    for (int i = 0; i < 4; i++) 
+    {  
+      EEPROM.write(i,pinCode.charAt(i));
+    }
+    pinCode = "1234";     
+    for (int i = 4; i < 8; i++) 
+    {    
+      EEPROM.write(i,pinCode.charAt(i-4));
+    }
+    // Since this is a new set we will reset the pinPoniter to '0'
+    // and save this value to EEProm address '250'
+    pinPointer = 0;
+    EEPROM.write(pinPointerSave,pinPointer); 
+    pinPointer = EEPROM.read(pinPointerSave);
+    Serial.println("Initialized pinPointer = ");
+    Serial.println(pinPointer);
+  }
+  else {
+    //If this is not a new set then we will load the pinPointer into variable
+    Serial.println("Master code DOES exist");
+    pinPointer = EEPROM.read(pinPointerSave);
+    Serial.println("Existing pinPointer = ");
+    Serial.println(pinPointer);
+  }
+  pinCode="";
+}// End of initializeMaster function
+
+
+// Function to erase all pinCodes by resetting the pinPointer to zero
+void earasePinCodes() { // *******************************************************************
+  EEPROM.write(pinPointerSave,0);
+}
+
+//Function to check for valid MasterCode
+boolean checkMaster(String mastCode)
+{
+  temp = "";
+  //Get first 4 char of EEProm memory
+  for (int i = 4; i < 8; i++) 
+  {
+    pinChar = (EEPROM.read(i));
+    temp += pinChar;
+  } 
+  if(temp == mastCode)
+  {
+    return true;
+  }
+  return false;
+}
+
+
+
